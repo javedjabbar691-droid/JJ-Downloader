@@ -1,0 +1,254 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>SnapSave | Video Downloader</title>
+    <!-- Tailwind CSS + Inter Font -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        /* Custom smooth loading spinner */
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .spinner {
+            animation: spin 0.8s linear infinite;
+        }
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 1.5rem;
+        }
+        .result-card {
+            transition: all 0.3s ease;
+        }
+        .result-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 25px -12px rgba(0, 0, 0, 0.25);
+        }
+        button:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+        input:focus {
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.3);
+        }
+    </style>
+</head>
+<body class="font-sans antialiased p-4 md:p-8">
+    <div class="max-w-4xl mx-auto">
+        <!-- Header -->
+        <div class="text-center mb-10 pt-4">
+            <div class="inline-flex items-center justify-center bg-white/20 backdrop-blur rounded-full p-3 mb-4">
+                <i class="fas fa-download text-white text-3xl"></i>
+            </div>
+            <h1 class="text-4xl md:text-5xl font-bold text-white mb-2 tracking-tight">
+                SnapSave
+            </h1>
+            <p class="text-white/90 text-lg md:text-xl">
+                Download videos from TikTok, Instagram & YouTube — No Watermark
+            </p>
+            <div class="flex flex-wrap justify-center gap-3 mt-4 text-white/80 text-sm">
+                <span class="bg-white/20 px-3 py-1 rounded-full"><i class="fab fa-tiktok mr-1"></i> TikTok</span>
+                <span class="bg-white/20 px-3 py-1 rounded-full"><i class="fab fa-instagram mr-1"></i> Instagram</span>
+                <span class="bg-white/20 px-3 py-1 rounded-full"><i class="fab fa-youtube mr-1"></i> YouTube</span>
+            </div>
+        </div>
+
+        <!-- Main Card -->
+        <div class="glass-card p-6 md:p-8 shadow-2xl">
+            <!-- URL Input Section -->
+            <div class="mb-8">
+                <label class="block text-gray-700 font-semibold mb-2 text-lg">
+                    <i class="fas fa-link mr-2 text-indigo-600"></i>Paste your link here
+                </label>
+                <div class="flex flex-col md:flex-row gap-3">
+                    <input type="text" 
+                           id="urlInput" 
+                           placeholder="https://www.tiktok.com/@user/video/123456789..." 
+                           class="flex-1 px-5 py-4 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none transition text-gray-800 text-base">
+                    <button id="downloadBtn" 
+                            class="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-bold py-4 px-8 rounded-xl transition duration-200 shadow-lg flex items-center justify-center gap-2 text-lg">
+                        <i class="fas fa-download"></i>
+                        <span>Download</span>
+                    </button>
+                </div>
+                <div id="errorMessage" class="mt-3 text-red-600 text-sm hidden"></div>
+            </div>
+
+            <!-- Loading Animation -->
+            <div id="loadingSpinner" class="hidden flex flex-col items-center justify-center py-8">
+                <div class="spinner">
+                    <i class="fas fa-circle-notch text-5xl text-indigo-600"></i>
+                </div>
+                <p class="text-gray-600 mt-3">Fetching your video...</p>
+            </div>
+
+            <!-- Results Section -->
+            <div id="resultsContainer" class="hidden">
+                <div class="border-t-2 border-gray-100 pt-6">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <i class="fas fa-video text-indigo-600"></i> Preview
+                    </h2>
+                    <div class="result-card bg-gray-50 rounded-xl overflow-hidden shadow-md">
+                        <div class="md:flex">
+                            <!-- Thumbnail -->
+                            <div id="thumbnailContainer" class="md:w-1/3 bg-gray-200 flex items-center justify-center">
+                                <img id="thumbnail" src="" alt="Video thumbnail" class="w-full h-auto object-cover">
+                            </div>
+                            <!-- Video Info + Save Button -->
+                            <div class="p-5 md:w-2/3 flex flex-col justify-between">
+                                <div>
+                                    <p id="videoTitle" class="font-bold text-gray-800 text-lg mb-2 line-clamp-2"></p>
+                                    <p id="videoDuration" class="text-gray-500 text-sm mb-4 flex items-center gap-1">
+                                        <i class="far fa-clock"></i> <span></span>
+                                    </p>
+                                </div>
+                                <a id="saveButton" 
+                                   href="#" 
+                                   target="_blank"
+                                   class="inline-flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-lg transition duration-200 shadow text-center">
+                                    <i class="fas fa-save"></i> Save Video
+                                </a>
+                                <p class="text-xs text-gray-400 mt-3">
+                                    <i class="fas fa-shield-alt"></i> Direct download link (best quality available)
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Info note -->
+            <div class="mt-8 text-center text-gray-500 text-sm border-t border-gray-100 pt-5">
+                <i class="fas fa-info-circle"></i> Supports TikTok (no watermark), Instagram Reels/Posts, and YouTube videos. Paste the full link and click Download.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const urlInput = document.getElementById('urlInput');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const loadingSpinner = document.getElementById('loadingSpinner');
+        const resultsContainer = document.getElementById('resultsContainer');
+        const errorMessageDiv = document.getElementById('errorMessage');
+        const thumbnailImg = document.getElementById('thumbnail');
+        const videoTitleSpan = document.getElementById('videoTitle');
+        const videoDurationSpan = document.querySelector('#videoDuration span');
+        const saveButton = document.getElementById('saveButton');
+
+        // Utility to show/hide error
+        function showError(msg) {
+            errorMessageDiv.textContent = msg;
+            errorMessageDiv.classList.remove('hidden');
+            setTimeout(() => {
+                errorMessageDiv.classList.add('hidden');
+            }, 6000);
+        }
+
+        function formatDuration(seconds) {
+            if (!seconds || seconds <= 0) return 'Duration unknown';
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function resetUI() {
+            // Hide results and loading, clear input maybe not
+            resultsContainer.classList.add('hidden');
+            loadingSpinner.classList.add('hidden');
+            errorMessageDiv.classList.add('hidden');
+            // Clear previous data
+            thumbnailImg.src = '';
+            videoTitleSpan.textContent = '';
+            videoDurationSpan.textContent = '';
+            saveButton.href = '#';
+        }
+
+        async function handleDownload() {
+            const url = urlInput.value.trim();
+            if (!url) {
+                showError('Please enter a valid video URL');
+                return;
+            }
+
+            // Basic URL validation (must include http)
+            if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                showError('URL must start with http:// or https://');
+                return;
+            }
+
+            // Reset UI & show loading
+            resetUI();
+            loadingSpinner.classList.remove('hidden');
+            downloadBtn.disabled = true;
+
+            try {
+                const response = await fetch('/download', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ url: url }),
+                });
+
+                const data = await response.json();
+
+                if (!response.ok || !data.success) {
+                    throw new Error(data.error || 'Failed to process video');
+                }
+
+                // Success: Populate results
+                videoTitleSpan.textContent = data.title || 'Untitled Video';
+                if (data.duration && data.duration > 0) {
+                    videoDurationSpan.textContent = formatDuration(data.duration);
+                } else {
+                    videoDurationSpan.textContent = 'Duration unknown';
+                }
+
+                if (data.thumbnail && data.thumbnail.startsWith('http')) {
+                    thumbnailImg.src = data.thumbnail;
+                } else {
+                    // Fallback placeholder
+                    thumbnailImg.src = 'https://via.placeholder.com/400x225?text=No+Thumbnail';
+                }
+
+                // Set direct download link
+                saveButton.href = data.download_url;
+                // Optional: add download attribute to force download?
+                // But we keep as regular link - user can right-click or click to open.
+                // For better UX, we add download attribute if file name known, but direct URL works.
+                
+                // Show results
+                resultsContainer.classList.remove('hidden');
+                
+                // Scroll to results smoothly
+                resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+            } catch (err) {
+                console.error('Download error:', err);
+                showError(err.message || 'Something went wrong. Check your link or try again.');
+                resultsContainer.classList.add('hidden');
+            } finally {
+                loadingSpinner.classList.add('hidden');
+                downloadBtn.disabled = false;
+            }
+        }
+
+        // Event listeners
+        downloadBtn.addEventListener('click', handleDownload);
+        urlInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                handleDownload();
+            }
+        });
+    </script>
+</body>
+</html>
