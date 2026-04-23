@@ -111,14 +111,12 @@
                                         <i class="far fa-clock"></i> <span></span>
                                     </p>
                                 </div>
-                                <a id="saveButton" 
-                                   href="#" 
-                                   target="_blank"
-                                   class="inline-flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-lg transition duration-200 shadow text-center">
+                                <button id="saveButton" 
+                                        class="inline-flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-lg transition duration-200 shadow text-center">
                                     <i class="fas fa-save"></i> Save Video
-                                </a>
+                                </button>
                                 <p class="text-xs text-gray-400 mt-3">
-                                    <i class="fas fa-shield-alt"></i> Direct download link (best quality available)
+                                    <i class="fas fa-shield-alt"></i> Video will be downloaded to your device
                                 </p>
                             </div>
                         </div>
@@ -144,6 +142,8 @@
         const videoDurationSpan = document.querySelector('#videoDuration span');
         const saveButton = document.getElementById('saveButton');
 
+        let currentVideoId = null;
+
         // Utility to show/hide error
         function showError(msg) {
             errorMessageDiv.textContent = msg;
@@ -161,15 +161,13 @@
         }
 
         function resetUI() {
-            // Hide results and loading, clear input maybe not
             resultsContainer.classList.add('hidden');
             loadingSpinner.classList.add('hidden');
             errorMessageDiv.classList.add('hidden');
-            // Clear previous data
             thumbnailImg.src = '';
             videoTitleSpan.textContent = '';
             videoDurationSpan.textContent = '';
-            saveButton.href = '#';
+            currentVideoId = null;
         }
 
         async function handleDownload() {
@@ -179,13 +177,11 @@
                 return;
             }
 
-            // Basic URL validation (must include http)
             if (!url.startsWith('http://') && !url.startsWith('https://')) {
                 showError('URL must start with http:// or https://');
                 return;
             }
 
-            // Reset UI & show loading
             resetUI();
             loadingSpinner.classList.remove('hidden');
             downloadBtn.disabled = true;
@@ -205,7 +201,10 @@
                     throw new Error(data.error || 'Failed to process video');
                 }
 
-                // Success: Populate results
+                // Store video ID for save endpoint
+                currentVideoId = data.video_id;
+                
+                // Populate results
                 videoTitleSpan.textContent = data.title || 'Untitled Video';
                 if (data.duration && data.duration > 0) {
                     videoDurationSpan.textContent = formatDuration(data.duration);
@@ -216,20 +215,10 @@
                 if (data.thumbnail && data.thumbnail.startsWith('http')) {
                     thumbnailImg.src = data.thumbnail;
                 } else {
-                    // Fallback placeholder
                     thumbnailImg.src = 'https://via.placeholder.com/400x225?text=No+Thumbnail';
                 }
-
-                // Set direct download link
-                saveButton.href = data.download_url;
-                // Optional: add download attribute to force download?
-                // But we keep as regular link - user can right-click or click to open.
-                // For better UX, we add download attribute if file name known, but direct URL works.
                 
-                // Show results
                 resultsContainer.classList.remove('hidden');
-                
-                // Scroll to results smoothly
                 resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
             } catch (err) {
@@ -242,8 +231,68 @@
             }
         }
 
+        // Handle save button click - triggers actual file download
+        async function handleSave() {
+            if (!currentVideoId) {
+                showError('No video loaded. Please try again.');
+                return;
+            }
+
+            // Show loading state on button
+            const originalText = saveButton.innerHTML;
+            saveButton.innerHTML = '<i class="fas fa-spinner spinner"></i> Downloading...';
+            saveButton.disabled = true;
+
+            try {
+                // Fetch the video file
+                const response = await fetch(`/save/${currentVideoId}`);
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Download failed');
+                }
+                
+                // Create a blob from the response
+                const blob = await response.blob();
+                
+                // Create download link
+                const downloadLink = document.createElement('a');
+                const url = window.URL.createObjectURL(blob);
+                downloadLink.href = url;
+                
+                // Extract filename from Content-Disposition header or use title
+                const contentDisposition = response.headers.get('Content-Disposition');
+                let filename = 'video.mp4';
+                if (contentDisposition) {
+                    const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                    if (match && match[1]) {
+                        filename = match[1].replace(/['"]/g, '');
+                    }
+                }
+                
+                downloadLink.setAttribute('download', filename);
+                document.body.appendChild(downloadLink);
+                downloadLink.click();
+                document.body.removeChild(downloadLink);
+                
+                // Clean up blob URL
+                window.URL.revokeObjectURL(url);
+                
+                // Show success message
+                showError('✓ Download started! Check your downloads folder.');
+                
+            } catch (err) {
+                console.error('Save error:', err);
+                showError('Failed to download video. Please try again.');
+            } finally {
+                saveButton.innerHTML = originalText;
+                saveButton.disabled = false;
+            }
+        }
+
         // Event listeners
         downloadBtn.addEventListener('click', handleDownload);
+        saveButton.addEventListener('click', handleSave);
         urlInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 handleDownload();
