@@ -1,9 +1,8 @@
 # main.py
 import os
 import logging
-import io
 import requests
-from flask import Flask, request, jsonify, render_template, send_file, Response
+from flask import Flask, request, jsonify, render_template, Response
 import yt_dlp
 
 # Disable logging for yt-dlp to keep console clean
@@ -16,7 +15,7 @@ app.secret_key = os.environ.get('SECRET_KEY', 'dev-key-for-render')
 BROWSER_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.5',
+    'Accept-Language': 'en-US,en;q=0.9',
     'Accept-Encoding': 'gzip, deflate, br',
     'Connection': 'keep-alive',
     'Upgrade-Insecure-Requests': '1',
@@ -25,6 +24,7 @@ BROWSER_HEADERS = {
     'Sec-Fetch-Site': 'none',
     'Sec-Fetch-User': '?1',
     'Cache-Control': 'max-age=0',
+    'Referer': 'https://www.tiktok.com/',
 }
 
 def sanitize_filename(filename):
@@ -32,14 +32,12 @@ def sanitize_filename(filename):
     invalid_chars = '<>:"/\\|?*'
     for char in invalid_chars:
         filename = filename.replace(char, '')
-    # Remove emojis and other non-ASCII if needed
     filename = ''.join(char for char in filename if ord(char) < 128)
-    return filename[:100]  # Limit length
+    return filename[:100]
 
 def get_video_info(url):
     """
-    Extract video information including direct download URL, thumbnail, and title.
-    Uses yt-dlp with proper headers to avoid blocking.
+    Extract video information using yt-dlp with TikTok-specific options
     """
     ydl_opts = {
         'quiet': True,
@@ -49,6 +47,13 @@ def get_video_info(url):
         'headers': BROWSER_HEADERS,
         'user_agent': BROWSER_HEADERS['User-Agent'],
         'referer': 'https://www.tiktok.com/',
+        # TikTok specific options
+        'extractor_args': {
+            'tiktok': {
+                'api_hostname': ['www.tiktok.com'],
+                'embed_url': ['https://www.tiktok.com/embed'],
+            }
+        }
     }
     
     try:
@@ -56,61 +61,83 @@ def get_video_info(url):
             # Extract info
             info = ydl.extract_info(url, download=False)
             
-            # Determine best format (highest quality video+audio)
+            # Get the best format URL
+            download_url = None
+            
+            # Try to get the no-watermark version first
             if 'formats' in info and len(info['formats']) > 0:
+                # Priority: video+audio with best quality, prefer no-watermark
                 best_format = None
-                best_quality = 0
+                best_quality = -1
                 
                 for f in info['formats']:
-                    # Preference order: video+audio, then video only
-                    has_video = f.get('vcodec') != 'none'
-                    has_audio = f.get('acodec') != 'none'
-                    
-                    # Quality scoring
-                    quality_score = 0
-                    if has_video and has_audio:
-                        quality_score = 3
-                    elif has_video:
-                        quality_score = 2
-                    elif has_audio:
-                        quality_score = 1
-                    
-                    # Check resolution for video
-                    height = f.get('height', 0)
-                    if height:
-                        quality_score += height / 1000
-                    
-                    if quality_score > best_quality:
-                        best_quality = quality_score
-                        best_format = f
+                    # Check if it's a video format
+                    if f.get('vcodec') != 'none':
+                        # Prefer formats with both video and audio
+                        quality_score = 0
+                        if f.get('acodec') != 'none':
+                            quality_score = 1000
+                        
+                        # Add resolution bonus
+                        height = f.get('height', 0)
+                        if height:
+                            quality_score += height
+                        
+                        # Check for no-watermark in format note
+                        format_note = f.get('format_note', '').lower()
+                        if 'watermark' not in format_note:
+                            quality_score += 10000  # Strong preference for no-watermark
+                        
+                        if quality_score > best_quality:
+                            best_quality = quality_score
+                            best_format = f
                 
                 if best_format:
                     download_url = best_format['url']
                 else:
-                    # Fallback to first format
-                    download_url = info['formats'][0]['url']
-            else:
+                    # Fallback to first video format
+                    for f in info['formats']:
+                        if f.get('vcodec') != 'none':
+                            download_url = f['url']
+                            break
+            
+            # If no format found, try direct URL
+            if not download_url:
                 download_url = info.get('url')
             
-            # Clean title for filename
-            title = info.get('title', 'video')
-            title = sanitize_filename(title)
-            if not title or title == 'video':
-                title = f"video_{abs(hash(download_url)) % 10000}"
+            # For TikTok, sometimes the direct URL is in 'url' field
+            if not download_url and 'entries' in info:
+                # Handle playlist/redirect cases
+                first_entry = info['entries'][0] if info['entries'] else None
+                if first_entry and 'url' in first_entry:
+                    download_url = first_entry['url']
             
-            # Extract metadata
+            # Clean title
+            title = info.get('title', 'tiktok_video')
+            title = sanitize_filename(title)
+            if not title or title == 'tiktok_video':
+                import time
+                title = f"tiktok_video_{int(time.time())}"
+            
             result = {
                 'title': title,
                 'thumbnail': info.get('thumbnail', ''),
                 'download_url': download_url,
                 'duration': info.get('duration', 0),
                 'platform': info.get('extractor_key', 'Unknown'),
-                'ext': best_format.get('ext', 'mp4') if best_format else 'mp4'
+                'ext': 'mp4'
             }
+            
+            # Validate we got a download URL
+            if not result['download_url']:
+                return None, "Could not extract video URL. The video might be protected."
+            
             return result, None
             
     except Exception as e:
         error_msg = str(e)
+        logging.error(f"yt-dlp error: {error_msg}")
+        
         # Provide user-friendly error messages
         if 'Unsupported URL' in error_msg or 'not supported' in error_msg.lower():
             error_msg = "This link is not supported. Please use TikTok, Instagram, or YouTube links."
@@ -118,22 +145,43 @@ def get_video_info(url):
             error_msg = "This video is private or requires login."
         elif 'unavailable' in error_msg.lower() or 'removed' in error_msg.lower():
             error_msg = "This video is unavailable or has been removed."
-        elif 'blocked' in error_msg.lower() or '429' in error_msg:
-            error_msg = "Rate limited. Please try again in a few minutes."
+        elif '403' in error_msg or 'forbidden' in error_msg.lower():
+            error_msg = "Access denied. Please try a different video or check if it's public."
         
         return None, error_msg
 
 def stream_video_from_url(download_url):
     """
-    Stream video from URL to memory using requests with proper headers.
-    Returns a generator for streaming or BytesIO object.
+    Stream video from URL with TikTok-specific headers to avoid 403
     """
     try:
-        # Make request with browser headers
-        headers = BROWSER_HEADERS.copy()
-        headers['Range'] = 'bytes=0-'  # Request full video
+        # Enhanced headers for TikTok CDN
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'video/webm,video/mp4,video/*;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Referer': 'https://www.tiktok.com/',
+            'Origin': 'https://www.tiktok.com',
+            'Sec-Fetch-Dest': 'video',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'cross-site',
+            'Range': 'bytes=0-',
+        }
         
+        # First attempt with full headers
         response = requests.get(download_url, headers=headers, stream=True, timeout=30)
+        
+        # If 403, try with fewer headers
+        if response.status_code == 403:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': 'https://www.tiktok.com/',
+                'Range': 'bytes=0-',
+            }
+            response = requests.get(download_url, headers=headers, stream=True, timeout=30)
+        
         response.raise_for_status()
         
         # Stream the content in chunks
@@ -142,23 +190,25 @@ def stream_video_from_url(download_url):
                 if chunk:
                     yield chunk
         
-        return generate(), response.headers.get('content-type', 'video/mp4')
+        # Get content type from response
+        content_type = response.headers.get('content-type', 'video/mp4')
         
-    except Exception as e:
+        # Ensure it's a video type
+        if 'text' in content_type:
+            content_type = 'video/mp4'
+        
+        return generate(), content_type
+        
+    except requests.exceptions.RequestException as e:
         logging.error(f"Streaming failed: {str(e)}")
         raise e
 
 @app.route('/')
 def index():
-    """Serve the frontend page"""
     return render_template('index.html')
 
 @app.route('/download', methods=['POST'])
 def download_video():
-    """
-    API endpoint to process video URL and return download info.
-    Expects JSON: {"url": "https://..."}
-    """
     data = request.get_json()
     if not data or 'url' not in data:
         return jsonify({'error': 'No URL provided'}), 400
@@ -167,7 +217,14 @@ def download_video():
     if not video_url:
         return jsonify({'error': 'URL cannot be empty'}), 400
     
-    # Process the video
+    # Expand TikTok short URLs
+    if 'tiktok.com' in video_url and ('vt.tiktok' in video_url or 'tiktok.com/t' in video_url):
+        try:
+            response = requests.head(video_url, headers=BROWSER_HEADERS, allow_redirects=True, timeout=10)
+            video_url = response.url
+        except:
+            pass
+    
     video_info, error = get_video_info(video_url)
     
     if error:
@@ -176,7 +233,6 @@ def download_video():
     if not video_info or not video_info.get('download_url'):
         return jsonify({'error': 'Could not extract video. Try a different link.'}), 400
     
-    # Store in memory cache (will be cleaned on next request or expire)
     if not hasattr(app, 'video_cache'):
         app.video_cache = {}
     
@@ -188,10 +244,9 @@ def download_video():
         'ext': video_info.get('ext', 'mp4')
     }
     
-    # Clean up old entries (keep last 50)
-    if len(app.video_cache) > 50:
+    if len(app.video_cache) > 30:
         keys = list(app.video_cache.keys())
-        for key in keys[:-50]:
+        for key in keys[:-30]:
             del app.video_cache[key]
     
     return jsonify({
@@ -204,10 +259,6 @@ def download_video():
 
 @app.route('/proxy_download/<video_id>')
 def proxy_download(video_id):
-    """
-    Stream video directly from source to user without saving to disk.
-    Uses memory streaming to comply with Render's free tier.
-    """
     if not hasattr(app, 'video_cache') or video_id not in app.video_cache:
         return jsonify({'error': 'Video not found or expired. Please try again.'}), 404
     
@@ -216,17 +267,13 @@ def proxy_download(video_id):
     title = video_data['title']
     ext = video_data.get('ext', 'mp4')
     
-    # Remove from cache after retrieval to free memory
     del app.video_cache[video_id]
     
     try:
-        # Get streaming generator
         stream_generator, content_type = stream_video_from_url(download_url)
         
-        # Create filename
         filename = f"{title}.{ext}"
         
-        # Send file as attachment with streaming
         return Response(
             stream_generator,
             headers={
@@ -239,15 +286,14 @@ def proxy_download(video_id):
         )
         
     except requests.exceptions.Timeout:
-        return jsonify({'error': 'Download timeout. The video might be too large or server is slow.'}), 504
+        return jsonify({'error': 'Download timeout. Please try again.'}), 504
     except requests.exceptions.RequestException as e:
         logging.error(f"Proxy download error: {str(e)}")
-        return jsonify({'error': f'Failed to fetch video: {str(e)}'}), 500
+        return jsonify({'error': 'Failed to fetch video. Please try again.'}), 500
     except Exception as e:
         logging.error(f"Unexpected error: {str(e)}")
         return jsonify({'error': 'An unexpected error occurred. Please try again.'}), 500
 
-# Health check endpoint for Render
 @app.route('/health')
 def health():
     return jsonify({'status': 'healthy'}), 200
