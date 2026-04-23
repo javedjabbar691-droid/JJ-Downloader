@@ -1,4 +1,3 @@
-<!-- templates/index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -40,6 +39,10 @@
         input:focus {
             box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.3);
         }
+        /* Loading bar animation */
+        .download-progress {
+            transition: width 0.3s ease;
+        }
     </style>
 </head>
 <body class="font-sans antialiased p-4 md:p-8">
@@ -77,7 +80,7 @@
                     <button id="downloadBtn" 
                             class="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-bold py-4 px-8 rounded-xl transition duration-200 shadow-lg flex items-center justify-center gap-2 text-lg">
                         <i class="fas fa-download"></i>
-                        <span>Download</span>
+                        <span>Get Video</span>
                     </button>
                 </div>
                 <div id="errorMessage" class="mt-3 text-red-600 text-sm hidden"></div>
@@ -100,7 +103,7 @@
                     <div class="result-card bg-gray-50 rounded-xl overflow-hidden shadow-md">
                         <div class="md:flex">
                             <!-- Thumbnail -->
-                            <div id="thumbnailContainer" class="md:w-1/3 bg-gray-200 flex items-center justify-center">
+                            <div class="md:w-1/3 bg-gray-200 flex items-center justify-center">
                                 <img id="thumbnail" src="" alt="Video thumbnail" class="w-full h-auto object-cover">
                             </div>
                             <!-- Video Info + Save Button -->
@@ -115,8 +118,14 @@
                                         class="inline-flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-lg transition duration-200 shadow text-center">
                                     <i class="fas fa-save"></i> Save Video
                                 </button>
+                                <div id="downloadProgress" class="mt-3 hidden">
+                                    <div class="bg-gray-200 rounded-full h-2 overflow-hidden">
+                                        <div class="bg-green-600 h-2 download-progress" style="width: 0%"></div>
+                                    </div>
+                                    <p class="text-xs text-gray-500 mt-1 text-center">Downloading... please wait</p>
+                                </div>
                                 <p class="text-xs text-gray-400 mt-3">
-                                    <i class="fas fa-shield-alt"></i> Video will be downloaded to your device
+                                    <i class="fas fa-shield-alt"></i> Direct download to your device
                                 </p>
                             </div>
                         </div>
@@ -126,7 +135,8 @@
 
             <!-- Info note -->
             <div class="mt-8 text-center text-gray-500 text-sm border-t border-gray-100 pt-5">
-                <i class="fas fa-info-circle"></i> Supports TikTok (no watermark), Instagram Reels/Posts, and YouTube videos. Paste the full link and click Download.
+                <i class="fas fa-info-circle"></i> Supports TikTok (no watermark), Instagram Reels/Posts, and YouTube videos. <br>
+                <span class="text-xs">Note: Large videos may take a few seconds to process.</span>
             </div>
         </div>
     </div>
@@ -141,15 +151,25 @@
         const videoTitleSpan = document.getElementById('videoTitle');
         const videoDurationSpan = document.querySelector('#videoDuration span');
         const saveButton = document.getElementById('saveButton');
+        const downloadProgress = document.getElementById('downloadProgress');
+        const progressBar = document.querySelector('.download-progress');
 
         let currentVideoId = null;
 
         // Utility to show/hide error
-        function showError(msg) {
+        function showError(msg, isSuccess = false) {
             errorMessageDiv.textContent = msg;
             errorMessageDiv.classList.remove('hidden');
+            if (isSuccess) {
+                errorMessageDiv.classList.add('bg-green-100', 'text-green-700', 'p-2', 'rounded', 'border', 'border-green-200');
+                errorMessageDiv.classList.remove('text-red-600');
+            } else {
+                errorMessageDiv.classList.remove('bg-green-100', 'text-green-700', 'p-2', 'rounded', 'border', 'border-green-200');
+                errorMessageDiv.classList.add('text-red-600');
+            }
             setTimeout(() => {
                 errorMessageDiv.classList.add('hidden');
+                errorMessageDiv.classList.remove('bg-green-100', 'text-green-700', 'p-2', 'rounded', 'border', 'border-green-200');
             }, 6000);
         }
 
@@ -164,10 +184,12 @@
             resultsContainer.classList.add('hidden');
             loadingSpinner.classList.add('hidden');
             errorMessageDiv.classList.add('hidden');
+            downloadProgress.classList.add('hidden');
             thumbnailImg.src = '';
             videoTitleSpan.textContent = '';
             videoDurationSpan.textContent = '';
             currentVideoId = null;
+            if (progressBar) progressBar.style.width = '0%';
         }
 
         async function handleDownload() {
@@ -238,29 +260,31 @@
                 return;
             }
 
+            // Show progress bar
+            downloadProgress.classList.remove('hidden');
+            progressBar.style.width = '30%';
+            
             // Show loading state on button
             const originalText = saveButton.innerHTML;
-            saveButton.innerHTML = '<i class="fas fa-spinner spinner"></i> Downloading...';
+            saveButton.innerHTML = '<i class="fas fa-spinner spinner"></i> Preparing...';
             saveButton.disabled = true;
 
             try {
-                // Fetch the video file
-                const response = await fetch(`/save/${currentVideoId}`);
+                progressBar.style.width = '60%';
+                
+                // Fetch the video file from proxy endpoint
+                const response = await fetch(`/proxy_download/${currentVideoId}`);
+                
+                progressBar.style.width = '80%';
                 
                 if (!response.ok) {
                     const error = await response.json();
                     throw new Error(error.error || 'Download failed');
                 }
                 
-                // Create a blob from the response
-                const blob = await response.blob();
+                progressBar.style.width = '100%';
                 
-                // Create download link
-                const downloadLink = document.createElement('a');
-                const url = window.URL.createObjectURL(blob);
-                downloadLink.href = url;
-                
-                // Extract filename from Content-Disposition header or use title
+                // Get the filename from Content-Disposition header
                 const contentDisposition = response.headers.get('Content-Disposition');
                 let filename = 'video.mp4';
                 if (contentDisposition) {
@@ -270,6 +294,13 @@
                     }
                 }
                 
+                // Create a blob from the response
+                const blob = await response.blob();
+                
+                // Create download link and trigger download
+                const downloadLink = document.createElement('a');
+                const url = window.URL.createObjectURL(blob);
+                downloadLink.href = url;
                 downloadLink.setAttribute('download', filename);
                 document.body.appendChild(downloadLink);
                 downloadLink.click();
@@ -279,11 +310,19 @@
                 window.URL.revokeObjectURL(url);
                 
                 // Show success message
-                showError('✓ Download started! Check your downloads folder.');
+                showError('✓ Download started! Check your downloads folder.', true);
+                
+                // Reset progress after a delay
+                setTimeout(() => {
+                    downloadProgress.classList.add('hidden');
+                    progressBar.style.width = '0%';
+                }, 2000);
                 
             } catch (err) {
                 console.error('Save error:', err);
-                showError('Failed to download video. Please try again.');
+                showError(err.message || 'Failed to download video. Please try again.');
+                downloadProgress.classList.add('hidden');
+                progressBar.style.width = '0%';
             } finally {
                 saveButton.innerHTML = originalText;
                 saveButton.disabled = false;
@@ -297,6 +336,11 @@
             if (e.key === 'Enter') {
                 handleDownload();
             }
+        });
+        
+        // Clean up on page unload (optional)
+        window.addEventListener('beforeunload', () => {
+            // Any cleanup if needed
         });
     </script>
 </body>
